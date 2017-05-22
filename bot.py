@@ -1,120 +1,108 @@
 from telegram import ReplyKeyboardMarkup
-from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters, RegexHandler,
-                          ConversationHandler)
+from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
+                          RegexHandler, ConversationHandler)
+
+from sqlalchemy.sql import select
+from database import engine, users, dogs, tracking
 
 import logging
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 
-USER_TYPE, NAME, SURNAME, EMAIL, GENDER, AGE, PHOTO, REGION = range(8)
+USER_TYPE, FIRST_NAME, LAST_NAME, AGE, GENDER, PHOTO, END_REGISTRATION = range(7)
 
 
-def start(bot, update):
-    update.message.reply_text('Olá')
-    reply_keyboard = [['Dono', 'Passeador']]
-    reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
-    update.message.reply_text('Dono ou passeador?', reply_markup=reply_markup)
-
-    return USER_TYPE
-
-
-def user_type(bot, update, user_data):
-    text = update.message.text
-    flag_type = {'Dono': 'is_owner', 'Passeador': 'is_walker'}[text]
-    user_data[flag_type] = 1
+def start(bot, update, user_data):
+    user_id = update.message.from_user.id
+    username = update.message.from_user.username
     
-    update.message.reply_text('Nome?')
+    t = select([tracking]).where(tracking.c.id == user_id) 
+    if not engine.execute(t).fetchone():
+        engine.execute(tracking.insert().values(id=user_id, username=username))
 
-    return NAME
+    s = select([users]).where(users.c.id == user_id)
+    user = engine.execute(s).fetchone()
+    if not user:
+        update.message.reply_text('Você ainda não é um usuário registrado')
+        update.message.reply_text('Vamos começar com algumas perguntas')
 
-def name(bot, update, user_data):
-    text = update.message.text
-    user_data['name'] = text
+        reply_keyboard = [['Dono', 'Passeador']]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
+                                           one_time_keyboard=True)
+        update.message.reply_text('Você quer ser registrado como dono ou passeador?',
+                                  reply_markup=reply_markup)
+        return END_REGISTRATION
 
-    update.message.reply_text('Sobrenome?')
+    elif user.approved:
+        update.message.reply_text('Bem vindo, %s' % user.username)
+        return ConversationHandler.END
 
-    return SURNAME
-
-
-def surname(bot, update, user_data):
-    text = update.message.text
-    user_data['surname'] = text
-
-    update.message.reply_text('Email?')
-
-    return EMAIL
-
-
-def email(bot, update, user_data):
-    text = update.message.text
-    user_data['email'] = text
-
-    update.message.reply_text('Sexo?')
-
-    return GENDER
+    elif not user.approved:
+        update.message.reply_text('Você ainda não foi aprovado %s' % username)
+        return ConversationHandler.END
 
 
-def gender(bot, update, user_data):
-    text = update.message.text
-    user_data['gender'] = text
+def first_name(bot, update, user_data):
+    flag_type = {'Dono': 'is_owner', 'Passeador': 'is_walker'}
+    user_data[flag_type[update.message.text]] = 1
+    update.message.reply_text('Qual é o seu nome?')
+    return LAST_NAME
 
-    update.message.reply_text('Idade?')
 
+def last_name(bot, update, user_data):
+    user_data['first_name'] = update.message.text
+    update.message.reply_text('Qual é o seu sobrenome?')
     return AGE
 
 
 def age(bot, update, user_data):
-    text = update.message.text
-    user_data['age'] = int(text)
+    user_data['last_name'] = update.message.text
+    update.message.reply_text('Qual é a sua idade?')
+    return GENDER
 
-    update.message.reply_text('Nos envie uma foto sua')
 
+def gender(bot, update, user_data):
+    user_data['age'] = update.message.text
+    reply_keyboard = [['Masculino', 'Feminino']]
+    reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
+                                       one_time_keyboard=True)
+    update.message.reply_text('Gênero?', reply_markup=reply_markup)
     return PHOTO
 
 
 def photo(bot, update, user_data):
-    text = update.message.text
-    user_data['photo'] = img_to_url(text)
-
-    update.message.reply_text('Regiao?')
-
-    return REGION
+    user_data['gender'] = update.message.text[0]
+    update.message.reply_text('Pode nos enviar uma foto sua?')
+    return END_REGISTRATION
 
 
-def region(bot, update, user_data):
-    text = update.message.text
-    user_data['region'] = update.message.text
-
+def end_registration(bot, update, user_data):
     return ConversationHandler.END
 
 
 def main():
-    updater = Updater('TOKEN')
+    updater = Updater('344207483:AAGTWKuFIlvXVRGG45gsHsX7ISIiNwWWxHc')
     dp = updater.dispatcher
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[CommandHandler('start', start, pass_user_data=True)],
 
         states={
-            USER_TYPE: [MessageHandler(Filters.text, user_type, user_data=True)],
+            FIRST_NAME: [RegexHandler('^(Dono|Passeador)$', first_name, pass_user_data=True)],
 
-            NAME: [MessageHandler(Filters.text, name, user_data=True)],
+            LAST_NAME: [MessageHandler(Filters.text, last_name, pass_user_data=True)],
 
-            SURNAME: [MessageHandler(Filters.text, surname, user_data=True)],
+            AGE: [MessageHandler(Filters.text, age, pass_user_data=True)],
 
-            EMAIL: [MessageHandler(Filters.text, email, user_data=True)],
+            GENDER: [RegexHandler('^[10-99]+$', gender, pass_user_data=True)],
 
-            GENDER: [MessageHandler(Filters.text, gender, user_data=True)],
+            PHOTO: [RegexHandler('^(Masculino|Feminino)$', photo, pass_user_data=True)],
 
-            AGE: [MessageHandler(Filters.text, age, user_data=True)],
-
-            PHOTO: [MessageHandler(Filters.photo, photo, user_data=True)],
-
-            REGION: [MessageHandler(Filters.location, region, user_data=True)],
+            END_REGISTRATION: [MessageHandler(Filters.photo, end_registration, pass_user_data=True)],
         },
 
-        fallbacks=[]
+        fallbacks=[],
     )
 
     dp.add_handler(conv_handler)
