@@ -3,7 +3,7 @@ from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
                           RegexHandler, ConversationHandler)
 
 from sqlalchemy.sql import select
-from database import engine, users, dogs, tracking
+from database import engine, users, dogs, tracking, walker_requests
 
 import logging
 
@@ -11,13 +11,18 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
                     level=logging.INFO)
 
 USER_TYPE, FIRST_NAME, LAST_NAME, AGE, GENDER, PHOTO, END_REGISTRATION = range(7)
+OWNER_MENU, REQUESTS, DOG_NAME, DOG_BREED, DOG_AGE, DOG_PHOTO = range(7, 13)
 
 
 def start(bot, update, user_data):
     user_id = update.message.from_user.id
     username = update.message.from_user.username
-    
-    t = select([tracking]).where(tracking.c.id == user_id) 
+
+    user_data['id'] = user_id
+    user_data['username'] = username
+    user_data['approved'] = True
+
+    t = select([tracking]).where(tracking.c.id == user_id)
     if not engine.execute(t).fetchone():
         engine.execute(tracking.insert().values(id=user_id, username=username))
 
@@ -32,19 +37,35 @@ def start(bot, update, user_data):
                                            one_time_keyboard=True)
         update.message.reply_text('Você quer ser registrado como dono ou passeador?',
                                   reply_markup=reply_markup)
-        return END_REGISTRATION
+        return FIRST_NAME
 
     elif user.approved:
-        update.message.reply_text('Bem vindo, %s' % user.username)
-        return ConversationHandler.END
+        update.message.reply_text('Bem vindo de volta, %s' % user.username)
+
+        if user.user_type == 'dono':
+            reply_keyboard = [
+                ['Meus pedidos'],
+                ['Meus dogs'],
+                ['Registrar novo dog']
+            ]
+            reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+            update.message.reply_text('O que você deseja fazer hoje?', reply_markup=reply_markup)
+
+            return OWNER_MENU
+
+        elif user.user_type == 'passeador':
+            update.message.reply_text('Hellooooo')
+
+            return ConversationHandler.END
 
     elif not user.approved:
-        update.message.reply_text('Você ainda não foi aprovado %s' % username)
+        update.message.reply_text('Você ainda não foi aprovado, %s' % username)
         return ConversationHandler.END
 
 
 def first_name(bot, update, user_data):
     flag_type = {'Dono': 'is_owner', 'Passeador': 'is_walker'}
+    user_data['user_type'] = update.message.text.lower()
     user_data[flag_type[update.message.text]] = 1
     update.message.reply_text('Qual é o seu nome?')
     return LAST_NAME
@@ -78,6 +99,144 @@ def photo(bot, update, user_data):
 
 
 def end_registration(bot, update, user_data):
+    engine.execute(users.insert().values(**user_data))
+
+    update.message.reply_text('Obrigado pelo interesse')
+    update.message.reply_text('Nossos administradores entrarão em contato '
+                              'assim que você for aprovado')
+
+    return ConversationHandler.END
+
+
+def owner_menu(bot, update, user_data):
+    text = update.message.text
+
+    if text == 'Meus pedidos':
+        user_data['i'] = 1
+        reply_keyboard = [['Up', 'Down']]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
+                                           one_time_keyboard=True)
+        s = select([walker_requests]).where(walker_requests.c.owner_id == user_data['id'])
+        data = engine.execute(s).fetchone()
+
+        walker = engine.execute(
+            select([users]).where(users.c.id == data['walker_id'])
+        ).fetchone()
+
+        dog = engine.execute(
+            select([dogs]).where(dogs.c.id == data['dog_id'])
+        ).fetchone()
+
+        update.message.reply_text('%s, %s' % (walker.first_name, dog.name),
+                                  reply_markup=reply_markup)
+
+        user_data['walker_username'] = walker.username
+
+        return REQUESTS
+
+    elif text == 'Meus dogs':
+        s = select([dogs]).where(dogs.c.owner_id == user_data['id'])
+        for dog in engine.execute(s):
+            update.message.reply_text('{d[name]} {d[breed]} {d[age]}'.format(d=dog))
+
+        reply_keyboard = [
+            ['Meus pedidos', 'Meus dogs'],
+            ['Registrar novo dog', 'Não'],
+        ]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+        update.message.reply_text('Deseja fazer mais alguma coisa?', reply_markup=reply_markup)
+
+        return OWNER_MENU
+
+    elif text == 'Registrar novo dog':
+        user_data.clear()
+        user_data['owner_id'] = update.message.from_user.id
+
+        update.message.reply_text('Qual o nome dele?')
+        return DOG_NAME
+
+
+def owner_requests(bot, update, user_data):
+    text = update.message.text
+    if text == 'Down':
+        try:
+            s = select([walker_requests]).where(walker_requests.c.owner_id == user_data['id'])
+            data = engine.execute(s).fetchall()[user_data['i']]
+            user_data['i'] = user_data['i'] + 1
+
+            walker = engine.execute(
+                select([users]).where(users.c.id == data['walker_id'])
+            ).fetchone()
+
+            dog = engine.execute(
+                select([dogs]).where(dogs.c.id == data['dog_id'])
+            ).fetchone()
+
+            reply_keyboard = [['Up', 'Down']]
+            reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
+                                               one_time_keyboard=True)
+            update.message.reply_text('%s, %s' % (walker.first_name, dog.name),
+                                      reply_markup=reply_markup)
+            user_data['walker_username'] = walker.username
+
+            return REQUESTS
+
+        except IndexError:
+            update.message.reply_text('Não há mais pedidos')
+
+            reply_keyboard = [
+                ['Meus pedidos', 'Meus dogs'],
+                ['Registrar novo dog', 'Não'],
+            ]
+            reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+            update.message.reply_text('Deseja fazer mais alguma coisa?', reply_markup=reply_markup)
+
+            return OWNER_MENU
+    
+    elif text == 'Up':
+        update.message.reply_text(user_data['walker_username'])
+
+        return ConversationHandler.END
+
+
+def dog_name(bot, update, user_data):
+    user_data['name'] = update.message.text
+
+    update.message.reply_text('Qual a raça dele?')
+    return DOG_BREED
+
+
+def dog_breed(bot, update, user_data):
+    user_data['breed'] = update.message.text
+
+    update.message.reply_text('Qual a idade dele?')
+    return DOG_AGE
+
+
+def dog_age(bot, update, user_data):
+    user_data['age'] = int(update.message.text)
+
+    update.message.reply_text('Pode nos enviar uma foto dele?')
+    return DOG_PHOTO
+
+
+def dog_photo(bot, update, user_data):
+    engine.execute(dogs.insert().values(**user_data))
+    update.message.reply_text('Obrigado! Seu cachorro acaba de ser registrado no nosso sistema.')
+
+    reply_keyboard = [
+        ['Meus pedidos', 'Meus dogs'],
+        ['Registrar novo dog', 'Não'],
+    ]
+    reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+    update.message.reply_text('Deseja fazer mais alguma coisa?', reply_markup=reply_markup)
+
+    return REQUESTS
+
+
+def cancel(bot, update):
+    update.message.reply_text('Obrigado')
+
     return ConversationHandler.END
 
 
@@ -100,9 +259,23 @@ def main():
             PHOTO: [RegexHandler('^(Masculino|Feminino)$', photo, pass_user_data=True)],
 
             END_REGISTRATION: [MessageHandler(Filters.photo, end_registration, pass_user_data=True)],
+
+            OWNER_MENU: [RegexHandler('^(Meus pedidos|Meus dogs|Registrar novo dog)$',
+                                      owner_menu, pass_user_data=True)],
+
+            REQUESTS: [RegexHandler('^(Up|Down)$', owner_requests, pass_user_data=True)],
+
+            DOG_NAME: [MessageHandler(Filters.text, dog_name, pass_user_data=True)],
+
+            DOG_BREED: [MessageHandler(Filters.text, dog_breed, pass_user_data=True)],
+
+            DOG_AGE: [MessageHandler(Filters.text, dog_age, pass_user_data=True)],
+
+            DOG_PHOTO: [MessageHandler(Filters.photo, dog_photo, pass_user_data=True)],
+
         },
 
-        fallbacks=[],
+        fallbacks=[RegexHandler('^Não$', cancel)],
     )
 
     dp.add_handler(conv_handler)
