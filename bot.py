@@ -20,7 +20,6 @@ def start(bot, update, user_data):
 
     user_data['id'] = user_id
     user_data['username'] = username
-    user_data['approved'] = True
 
     t = select([tracking]).where(tracking.c.id == user_id)
     if not engine.execute(t).fetchone():
@@ -99,6 +98,7 @@ def photo(bot, update, user_data):
 
 
 def end_registration(bot, update, user_data):
+    user_data['approved'] = True
     engine.execute(users.insert().values(**user_data))
 
     update.message.reply_text('Obrigado pelo interesse')
