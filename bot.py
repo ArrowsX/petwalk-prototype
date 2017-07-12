@@ -1,3 +1,4 @@
+import time
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
                           RegexHandler, ConversationHandler)
@@ -52,7 +53,8 @@ def start(bot, update, user_data):
             reply_keyboard = [
                 ['Meus pedidos'],
                 ['Meus dogs'],
-                ['Registrar novo dog']
+                ['Registrar novo dog'],
+                ['Solicitar serviço'], 
             ]
             reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
             update.message.reply_text('O que você deseja fazer hoje?', reply_markup=reply_markup)
@@ -60,8 +62,9 @@ def start(bot, update, user_data):
             return OWNER_MENU
 
         elif user.user_type == 'passeador':
+            update.message.reply_text('Vamos tentar achar alguns cachorros para você')
             user_data['i'] = 1
-            reply_keyboard = [['Up', 'Down']]
+            reply_keyboard = [['👍', '👎']]
             reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
                                                one_time_keyboard=True)
             dog = engine.execute(
@@ -69,7 +72,7 @@ def start(bot, update, user_data):
                 .where(dogs.c.id == user_data['i'])
             ).fetchone()
 
-            update.message.reply_text('%s, %s' % (dog.name, dog.age),
+            update.message.reply_text('%s\n%s ano(s)' % (dog.name, dog.age),
                                       reply_markup=reply_markup)
 
             return AVAILABLE_DOGS
@@ -128,7 +131,7 @@ def owner_menu(bot, update, user_data):
 
     if text == 'Meus pedidos':
         user_data['i'] = 1
-        reply_keyboard = [['Up', 'Down']]
+        reply_keyboard = [['👍', '👎']]
         reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
                                            one_time_keyboard=True)
         data = engine.execute(
@@ -146,7 +149,7 @@ def owner_menu(bot, update, user_data):
             .where(dogs.c.id == data['dog_id'])
         ).fetchone()
 
-        update.message.reply_text('%s, %s' % (walker.first_name, dog.name),
+        update.message.reply_text('Nome: %s %s\nCachorro: %s\nServiço: Passeio' % (walker.first_name, walker.last_name, dog.name),
                                   reply_markup=reply_markup)
 
         user_data['walker_username'] = walker.username
@@ -160,7 +163,8 @@ def owner_menu(bot, update, user_data):
 
         reply_keyboard = [
             ['Meus pedidos', 'Meus dogs'],
-            ['Registrar novo dog', 'Não'],
+            ['Registrar novo dog', 'Solicitar serviço'], 
+            ['Não'],
         ]
         reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
         update.message.reply_text('Deseja fazer mais alguma coisa?', reply_markup=reply_markup)
@@ -177,7 +181,7 @@ def owner_menu(bot, update, user_data):
 
 def owner_requests(bot, update, user_data):
     text = update.message.text
-    if text == 'Down':
+    if text == '👎':
         try:
             s = select([walker_requests]).where(walker_requests.c.owner_id == user_data['id'])
             data = engine.execute(s).fetchall()[user_data['i']]
@@ -193,10 +197,10 @@ def owner_requests(bot, update, user_data):
                 .where(dogs.c.id == data['dog_id'])
             ).fetchone()
 
-            reply_keyboard = [['Up', 'Down']]
+            reply_keyboard = [['👍', '👎']]
             reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
                                                one_time_keyboard=True)
-            update.message.reply_text('%s, %s' % (walker.first_name, dog.name),
+            update.message.reply_text('Nome: %s %s\nCachorro: %s\nServiço: Passeio' % (walker.first_name, walker.last_name, dog.name),
                                       reply_markup=reply_markup)
             user_data['walker_username'] = walker.username
 
@@ -207,25 +211,30 @@ def owner_requests(bot, update, user_data):
 
             reply_keyboard = [
                 ['Meus pedidos', 'Meus dogs'],
-                ['Registrar novo dog', 'Não'],
+                ['Registrar novo dog', 'Solicitar serviço'], 
+                ['Não'],
             ]
             reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
             update.message.reply_text('Deseja fazer mais alguma coisa?', reply_markup=reply_markup)
 
             return OWNER_MENU
 
-    elif text == 'Up':
-        update.message.reply_text('@' + user_data['walker_username'])
+    elif text == '👍':
+        update.message.reply_text('Pedido recebido')
+        time.sleep(1)
+        update.message.reply_text('Agora só resta combinar o local de encontro com @LaisZucatto')
+        time.sleep(1)
+        update.message.reply_text('Obrigado')
 
         return ConversationHandler.END
 
 
 def available_dogs(bot, update, user_data):
     text = update.message.text
-    if text == 'Down':
+    if text == '👎':
         try:
             user_data['i'] = user_data['i'] + 1
-            reply_keyboard = [['Up', 'Down']]
+            reply_keyboard = [['👍', '👎']]
             reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True,
                                                one_time_keyboard=True)
             dog = engine.execute(
@@ -233,17 +242,20 @@ def available_dogs(bot, update, user_data):
                 .where(dogs.c.id == user_data['i'])
             ).fetchone()
 
-            update.message.reply_text('%s, %s' % (dog.name, dog.age),
+            update.message.reply_text('%s\n%s ano(s)' % (dog.name, dog.age),
                                       reply_markup=reply_markup)
 
             return AVAILABLE_DOGS
 
-        except IndexError:
-            update.message.reply_text('Não há mais pedidos')
+        except AttributeError:
+            update.message.reply_text('Não há mais cachorros disponíveis')
 
             return ConversationHandler.END
 
-    elif text == 'Up':
+    elif text == '👍':
+        update.message.reply_text('Pedido recebido')
+        time.sleep(1)
+        update.message.reply_text('Caso você for aprovado, o dono entrará em contato com você em breve')
         update.message.reply_text('Obrigado')
 
         return ConversationHandler.END
@@ -276,7 +288,8 @@ def dog_photo(bot, update, user_data):
 
     reply_keyboard = [
         ['Meus pedidos', 'Meus dogs'],
-        ['Registrar novo dog', 'Não'],
+        ['Registrar novo dog', 'Solicitar serviço'], 
+        ['Não'],
     ]
     reply_markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
     update.message.reply_text('Deseja fazer mais alguma coisa?', reply_markup=reply_markup)
@@ -291,7 +304,7 @@ def cancel(bot, update):
 
 
 def main():
-    updater = Updater('344207483:AAGTWKuFIlvXVRGG45gsHsX7ISIiNwWWxHc')
+    updater = Updater('340733779:AAE8ZqxhUpDRddzoK23TdPfphWi5JEhVhFM')
     dp = updater.dispatcher
 
     conv_handler = ConversationHandler(
@@ -313,9 +326,9 @@ def main():
             OWNER_MENU: [RegexHandler('^(Meus pedidos|Meus dogs|Registrar novo dog)$',
                                       owner_menu, pass_user_data=True)],
 
-            REQUESTS: [RegexHandler('^(Up|Down)$', owner_requests, pass_user_data=True)],
+            REQUESTS: [RegexHandler('^(👍|👎)$', owner_requests, pass_user_data=True)],
 
-            AVAILABLE_DOGS: [RegexHandler('^(Up|Down)$', available_dogs, pass_user_data=True)],
+            AVAILABLE_DOGS: [RegexHandler('^(👍|👎)$', available_dogs, pass_user_data=True)],
 
             DOG_NAME: [MessageHandler(Filters.text, dog_name, pass_user_data=True)],
 
